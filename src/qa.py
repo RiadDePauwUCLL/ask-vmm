@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Tuple
@@ -10,6 +11,11 @@ import requests
 from pypdf import PdfReader
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+
+LOGGER = logging.getLogger(__name__)
+CHUNK_SIZE = 1200
+CHUNK_OVERLAP = 200
+REFUSAL_SCORE_THRESHOLD = 0.02
 
 REPORTS: List[Tuple[str, str]] = [
     (
@@ -65,7 +71,12 @@ class VMMQA:
         if destination.exists():
             return destination
 
-        response = requests.get(url, timeout=60, allow_redirects=True)
+        response = requests.get(
+            url,
+            timeout=60,
+            allow_redirects=True,
+            headers={"User-Agent": "Ask-VMM/1.0"},
+        )
         response.raise_for_status()
         destination.write_bytes(response.content)
         return destination
@@ -73,8 +84,11 @@ class VMMQA:
     def _load_reports(self) -> None:
         self.chunks = []
         for filename, url in REPORTS:
-            file_path = self._download_report(filename, url)
-            self._extract_pdf(file_path, url)
+            try:
+                file_path = self._download_report(filename, url)
+                self._extract_pdf(file_path, url)
+            except requests.RequestException:
+                LOGGER.exception("Could not download VMM report: %s", filename)
 
         if not self.chunks:
             return
@@ -99,28 +113,41 @@ class VMMQA:
         try:
             reader = PdfReader(str(file_path))
         except Exception:
+            LOGGER.exception("Could not read PDF: %s", file_path)
             return
 
         for page_num, page in enumerate(reader.pages, start=1):
             text = page.extract_text() or ""
-            cleaned = self._normalize_text(text)
-            if not cleaned:
-                continue
-            self.chunks.append(
-                Chunk(
-                    doc_name=file_path.name,
-                    page_number=page_num,
-                    text=cleaned,
-                    source_url=source_url,
+            for chunk_text in self._chunk_page(text):
+                self.chunks.append(
+                    Chunk(
+                        doc_name=file_path.name,
+                        page_number=page_num,
+                        text=chunk_text,
+                        source_url=source_url,
+                    )
                 )
-            )
 
     def _normalize_text(self, text: str) -> str:
         text = text.replace("\x00", " ")
         text = text.replace("\u00a0", " ")
-        text = re.sub(r"\s+", " ", text)
-        return text.strip()
+        lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines()]
+        return "\n".join(line for line in lines if line)
 
+    def _chunk_page(self, text: str) -> List[str]:
+        cleaned = self._normalize_text(text)
+        if not cleaned:
+            return []
+
+        chunks = []
+        start = 0
+        while start < len(cleaned):
+            end = min(start + CHUNK_SIZE, len(cleaned))
+            chunks.append(cleaned[start:end].strip())
+            if end == len(cleaned):
+                break
+            start = end - CHUNK_OVERLAP
+        return chunks
     def _clean_question(self, question: str) -> str:
         return re.sub(r"\s+", " ", question).strip()
 
@@ -145,7 +172,11 @@ class VMMQA:
             best = best[:450].rsplit(" ", 1)[0] + "..."
         return best.strip()
 
-    def answer_question(self, question: str) -> Tuple[str, List[Tuple[str, int]]]:
+    def answer_question(
+        self,
+        question: str,
+        refusal_score_threshold: float = REFUSAL_SCORE_THRESHOLD,
+    ) -> Tuple[str, List[Tuple[str, int]]]:
         if (
             not self.chunks
             or self.matrix is None
@@ -171,7 +202,7 @@ class VMMQA:
             return "Ik weet het niet. Ik kon in deze documenten geen antwoord vinden.", []
 
         best_score, best_chunk = max(selected, key=lambda item: item[0])
-        if best_score < 0.02:
+        if best_score < refusal_score_threshold:
             return "Ik weet het niet. Ik kon in deze documenten geen antwoord vinden.", []
 
         answer = self._answer_from_chunk(cleaned_question, best_chunk)
@@ -186,9 +217,16 @@ class VMMQA:
             for token in re.findall(r"[a-zA-Z0-9]+", answer)
             if token.lower() not in STOPWORDS and len(token) > 2
         }
+        chunk_tokens = {
+            token.lower()
+            for token in re.findall(r"[a-zA-Z0-9]+", best_chunk.text)
+            if token.lower() not in STOPWORDS and len(token) > 2
+        }
 
-        overlap = len(question_tokens & answer_tokens)
-        if question_tokens and overlap < min(2, len(question_tokens)):
+        answer_overlap = len(question_tokens & answer_tokens)
+        chunk_overlap = len(question_tokens & chunk_tokens)
+        strong_cross_language_match = best_score >= 0.18 and answer_overlap >= 1
+        if question_tokens and chunk_overlap < 2 and answer_overlap < 2 and not strong_cross_language_match:
             return "Ik weet het niet. Ik kon in deze documenten geen antwoord vinden.", []
 
         sources = [(chunk.doc_name, chunk.page_number) for (_, chunk) in selected[:3]]
