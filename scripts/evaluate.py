@@ -1,4 +1,3 @@
-import json
 import sys
 from pathlib import Path
 
@@ -36,7 +35,7 @@ QUESTIONS = [
     },
     {
         "question": "Wat worden voor de partikels in de luchtkwaliteitspakket besproken?",
-        "must_include": ["luchtkwaliteit", "lucht"],
+        "must_include": ["maatregelen"],
         "source_hint": "educatief_pakket_luchtkwaliteit.pdf",
     },
     {
@@ -59,12 +58,21 @@ QUESTIONS = [
         "must_include": ["maas", "waterkwaliteit"],
         "source_hint": "gemeenschappelijke_maas_waterkwaliteit.pdf",
     },
+    {
+        "question": "What is the BelAQI index?",
+        "must_include": ["BelAQI", "luchtkwaliteit"],
+        "source_hint": "beltair_persbericht.pdf",
+    },
 ]
 
 
 def run_eval():
     qa = VMMQA(ROOT / "data" / "reports")
     passed = 0
+    answerable = [item for item in QUESTIONS if item["source_hint"] != "no_answer"]
+    unanswerable = [item for item in QUESTIONS if item["source_hint"] == "no_answer"]
+    hits_at_3 = 0
+    refusals = 0
     for item in QUESTIONS:
         question = item["question"]
         answer, sources = qa.answer_question(question)
@@ -72,7 +80,13 @@ def run_eval():
         answer_text = answer.lower()
         matched = [kw.lower() for kw in item["must_include"] if kw.lower() in answer_text]
         source_ok = item["source_hint"] in source_names or any(item["source_hint"] in name for name in source_names)
-        ok = bool(matched) or source_ok
+        is_refusal = "ik weet het niet" in answer_text
+        if item["source_hint"] == "no_answer":
+            ok = is_refusal and not sources
+            refusals += int(ok)
+        else:
+            ok = bool(matched) and source_ok
+            hits_at_3 += int(source_ok)
         print(f"Q: {question}")
         print(f"A: {answer}")
         print(f"Sources: {sources}")
@@ -83,6 +97,8 @@ def run_eval():
 
     total = len(QUESTIONS)
     print(f"Summary: {passed}/{total} passed")
+    print(f"Hit@3: {hits_at_3}/{len(answerable)}")
+    print(f"Refusal accuracy: {refusals}/{len(unanswerable)}")
     return passed, total
 
 
