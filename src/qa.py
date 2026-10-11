@@ -166,15 +166,16 @@ class VMMQA:
         for chunk_score, chunk in selected:
             for sentence in re.split(r"(?<=[.!?])\s+|\n+", chunk.text):
                 score = self._sentence_score(sentence, question) + 0.1 * chunk_score
-                candidates.append((score, sentence))
+                candidates.append((score, sentence, chunk))
 
         if not candidates:
-            return ""
+            return "", None
 
-        best = max(candidates, key=lambda item: item[0])[1].strip()
+        _, best_sentence, answer_chunk = max(candidates, key=lambda item: item[0])
+        best = best_sentence.strip()
         if len(best) > 450:
             best = best[:450].rsplit(" ", 1)[0] + "..."
-        return best
+        return best, answer_chunk
 
     def answer_question(
         self,
@@ -209,7 +210,7 @@ class VMMQA:
         if best_score < refusal_score_threshold:
             return "Ik weet het niet. Ik kon in deze documenten geen antwoord vinden.", []
 
-        answer = self._answer_from_chunks(cleaned_question, selected)
+        answer, answer_chunk = self._answer_from_chunks(cleaned_question, selected)
 
         question_tokens = {
             token.lower()
@@ -229,7 +230,7 @@ class VMMQA:
 
         answer_overlap = len(question_tokens & answer_tokens)
         chunk_overlap = len(question_tokens & chunk_tokens)
-        english_markers = {"what", "which", "where", "when", "how", "does", "were", "was"}
+        english_markers = {"what", "which", "where", "when", "how", "does", "were"}
         question_is_english = bool(question_tokens & english_markers)
         question_identifiers = {
             token.lower()
@@ -257,7 +258,16 @@ class VMMQA:
         if question_tokens and chunk_overlap < 2 and answer_overlap < 2 and not strong_cross_language_match:
             return "Ik weet het niet. Ik kon in deze documenten geen antwoord vinden.", []
 
-        sources = [(chunk.doc_name, chunk.page_number) for (_, chunk) in selected[:3]]
+        source_chunks = ([answer_chunk] if answer_chunk is not None else []) + [
+            chunk for (_, chunk) in selected if chunk is not answer_chunk
+        ]
+        sources = []
+        seen_sources = set()
+        for chunk in source_chunks:
+            source = (chunk.doc_name, chunk.page_number)
+            if source not in seen_sources:
+                seen_sources.add(source)
+                sources.append(source)
         return answer, sources
 
     def list_documents(self) -> List[str]:

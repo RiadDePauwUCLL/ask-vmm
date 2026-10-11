@@ -52,7 +52,7 @@ This checks representative answerable, English, and deliberately unsupported que
 - page retrieval accuracy: whether the expected page appears in the top three citations
 - refusal accuracy: whether unsupported questions return no answer and no sources
 
-The development set contains 9 answerable cases and 5 refusal cases. A separate holdout contains 5 numeric/table-oriented answerable cases from `luchtbeleidsplan_bijlage_4.pdf` and 3 fresh refusal cases. The latest run achieved page retrieval accuracy 9/9 on development cases, answer fact accuracy 5/9, and holdout refusal accuracy 2/3. The overall result was 14/22 because the extractive baseline still misses some facts in table-heavy passages.
+The development set contains 9 answerable cases and 5 refusal cases. A separate holdout contains 5 numeric/table-oriented answerable cases from `luchtbeleidsplan_bijlage_4.pdf` and 3 fresh refusal cases. The latest run achieved page retrieval accuracy 9/9 on development cases, answer fact accuracy 5/9, holdout answer accuracy 2/5, and holdout refusal accuracy 2/3. The overall result was 14/22 because the extractive baseline still misses some facts in table-heavy passages. I used this holdout diagnostically while iterating, so it is now regression data rather than an unbiased generalization estimate; fresh questions are needed for that.
 
 The project also has focused tests:
 
