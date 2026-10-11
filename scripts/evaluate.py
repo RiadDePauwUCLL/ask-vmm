@@ -73,33 +73,103 @@ REFUSAL_CASES = [
     "Wat is de pH-waarde van de Noordzee in 2022?",
 ]
 
+HOLDOUT_ANSWERABLE_CASES = [
+    {
+        "question": "Welke NO2-grenswaarde werd volgens de modellering in 2016 overschreden?",
+        "gold_facts": ["40 µg/m³"],
+        "source": "luchtbeleidsplan_bijlage_4.pdf",
+        "gold_page": 6,
+    },
+    {
+        "question": "Welk percentage van de Vlaamse bevolking woonde in 2016 op een locatie met een overschrijding?",
+        "gold_facts": ["3.7 %"],
+        "source": "luchtbeleidsplan_bijlage_4.pdf",
+        "gold_page": 6,
+    },
+    {
+        "question": "Welk aandeel van het Vlaamse grondgebied werd volgens Tabel 2 overschreden?",
+        "gold_facts": ["0,28 %"],
+        "source": "luchtbeleidsplan_bijlage_4.pdf",
+        "gold_page": 7,
+    },
+    {
+        "question": "Welke sector levert de grootste Vlaamse bijdrage op stedelijk achtergrondniveau?",
+        "gold_facts": ["transportsector"],
+        "source": "luchtbeleidsplan_bijlage_4.pdf",
+        "gold_page": 8,
+    },
+    {
+        "question": "What model is used to calculate the NO2 concentrations?",
+        "gold_facts": ["rio-ifdm-ospm"],
+        "source": "luchtbeleidsplan_bijlage_4.pdf",
+        "gold_page": 6,
+    },
+]
+
+HOLDOUT_REFUSAL_CASES = [
+    "What was the average temperature in the Leie?",
+    "Wat was de PM10-concentratie in Brussel in 2024?",
+    "Hoeveel regen viel er in Antwerpen in 2023?",
+]
+
+
+def evaluate_answerable_case(qa, case):
+    answer, sources = qa.answer_question(case["question"])
+    answer_text = answer.lower()
+    source_ok = any(
+        name == case["source"] and page == case["gold_page"]
+        for name, page in sources
+    )
+    answer_facts_ok = all(fact.lower() in answer_text for fact in case["gold_facts"])
+    grounded_page = any(
+        chunk.doc_name == case["source"]
+        and chunk.page_number == case["gold_page"]
+        and all(fact.lower() in chunk.text.lower() for fact in case["gold_facts"])
+        for chunk in qa.chunks
+    )
+    return answer, sources, source_ok, answer_facts_ok, grounded_page
+
 
 def run_eval():
     qa = VMMQA(ROOT / "data" / "reports")
     passed = 0
     answerable_passed = 0
     hit_at_3 = 0
+    answer_fact_passed = 0
     refusal_passed = 0
 
     for case in ANSWERABLE_CASES:
-        answer, sources = qa.answer_question(case["question"])
-        answer_text = answer.lower()
-        source_names = [name for name, _ in sources]
-        source_ok = any(
-            name == case["source"] and page == case["gold_page"]
-            for name, page in sources
-        )
-        grounded_page = any(
-            chunk.doc_name == case["source"]
-            and chunk.page_number == case["gold_page"]
-            and all(fact.lower() in chunk.text.lower() for fact in case["gold_facts"])
-            for chunk in qa.chunks
-        )
-        ok = not answer_text.startswith("ik weet het niet") and source_ok and grounded_page
+        answer, sources, source_ok, answer_facts_ok, grounded_page = evaluate_answerable_case(qa, case)
+        ok = not answer.lower().startswith("ik weet het niet") and source_ok and answer_facts_ok and grounded_page
         answerable_passed += int(ok)
         hit_at_3 += int(source_ok)
+        answer_fact_passed += int(answer_facts_ok)
         passed += int(ok)
         print(f"Q: {case['question']}")
+        print(f"A: {answer}")
+        print(f"Sources: {sources}")
+        print(f"Result: {'PASS' if ok else 'FAIL'}")
+        print("---")
+
+    holdout_passed = 0
+    holdout_answer_facts = 0
+    for case in HOLDOUT_ANSWERABLE_CASES:
+        answer, sources, source_ok, answer_facts_ok, grounded_page = evaluate_answerable_case(qa, case)
+        ok = not answer.lower().startswith("ik weet het niet") and source_ok and answer_facts_ok and grounded_page
+        holdout_passed += int(ok)
+        holdout_answer_facts += int(answer_facts_ok)
+        print(f"HOLDOUT Q: {case['question']}")
+        print(f"A: {answer}")
+        print(f"Sources: {sources}")
+        print(f"Result: {'PASS' if ok else 'FAIL'}")
+        print("---")
+
+    holdout_refusals = 0
+    for question in HOLDOUT_REFUSAL_CASES:
+        answer, sources = qa.answer_question(question)
+        ok = "ik weet het niet" in answer.lower() and not sources
+        holdout_refusals += int(ok)
+        print(f"HOLDOUT Q: {question}")
         print(f"A: {answer}")
         print(f"Sources: {sources}")
         print(f"Result: {'PASS' if ok else 'FAIL'}")
@@ -116,11 +186,20 @@ def run_eval():
         print(f"Result: {'PASS' if ok else 'FAIL'}")
         print("---")
 
-    total = len(ANSWERABLE_CASES) + len(REFUSAL_CASES)
+    passed += holdout_passed + holdout_refusals
+    total = (
+        len(ANSWERABLE_CASES)
+        + len(REFUSAL_CASES)
+        + len(HOLDOUT_ANSWERABLE_CASES)
+        + len(HOLDOUT_REFUSAL_CASES)
+    )
     print(f"Summary: {passed}/{total} passed")
-    print(f"Answerable fact accuracy: {answerable_passed}/{len(ANSWERABLE_CASES)}")
-    print(f"Hit@3: {hit_at_3}/{len(ANSWERABLE_CASES)}")
-    print(f"Refusal accuracy: {refusal_passed}/{len(REFUSAL_CASES)}")
+    print(f"Answer fact accuracy: {answer_fact_passed}/{len(ANSWERABLE_CASES)}")
+    print(f"Page retrieval accuracy: {hit_at_3}/{len(ANSWERABLE_CASES)}")
+    print(f"Development refusal accuracy: {refusal_passed}/{len(REFUSAL_CASES)}")
+    print(f"Holdout answer accuracy: {holdout_passed}/{len(HOLDOUT_ANSWERABLE_CASES)}")
+    print(f"Holdout answer fact accuracy: {holdout_answer_facts}/{len(HOLDOUT_ANSWERABLE_CASES)}")
+    print(f"Holdout refusal accuracy: {holdout_refusals}/{len(HOLDOUT_REFUSAL_CASES)}")
     return passed, total
 
 

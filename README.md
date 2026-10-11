@@ -48,11 +48,11 @@ The project includes a lightweight validation script:
 
 This checks representative answerable, English, and deliberately unsupported questions against the real document corpus. Answerable cases use a gold fact and expected page that are not copied from the question; refusal cases are near-misses using corpus vocabulary. It reports:
 
-- strict pass/fail: answer content and expected source must both match for answerable questions
-- hit@3: whether the expected document appears in the top three citations
+- answer fact accuracy: whether the extracted answer contains the gold fact
+- page retrieval accuracy: whether the expected page appears in the top three citations
 - refusal accuracy: whether unsupported questions return no answer and no sources
 
-The current test set contains 9 answerable cases and 5 refusal cases. The latest run was 14/14 passed, with Hit@3 9/9 and refusal accuracy 5/5.
+The development set contains 9 answerable cases and 5 refusal cases. A separate holdout contains 5 numeric/table-oriented answerable cases from `luchtbeleidsplan_bijlage_4.pdf` and 3 fresh refusal cases. The latest run achieved page retrieval accuracy 9/9 on development cases, answer fact accuracy 5/9, and holdout refusal accuracy 2/3. The overall result was 14/22 because the extractive baseline still misses some facts in table-heavy passages.
 
 The project also has focused tests:
 
@@ -62,7 +62,7 @@ To inspect the score trade-off behind the default refusal threshold, run:
 
 - python scripts/calibrate.py
 
-This prints false refusals and false accepts for several threshold values. The current threshold is a conservative starting point, not a production calibration.
+This prints false refusals and false accepts for several score-threshold values. The lexical support rule and cross-language exception are held fixed; both also need calibration on a larger held-out set. The current threshold is a conservative starting point, not a production calibration.
 
 GitHub Actions runs the same tests on pushes and pull requests.
 
