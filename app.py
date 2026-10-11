@@ -17,7 +17,7 @@ def build_index() -> VMMQA:
 index = build_index()
 
 st.title("Ask VMM")
-st.caption("Prototype voor vragen over water-, lucht- en klimaatinformatie gebaseerd op publieke Vlaamse rapporten.")
+st.caption("Lokale prototypezoeker voor water-, lucht- en klimaatinformatie uit publieke Vlaamse rapporten.")
 
 with st.sidebar:
     st.subheader("Beschikbare documenten")
@@ -38,7 +38,7 @@ if st.button("Antwoord zoeken"):
 
     st.markdown("### Bronvermelding")
     if not sources:
-        st.write("Geen bron gevonden in de ingesteeerde documenten.")
+        st.write("Geen bron gevonden in de ingeladen documenten.")
     else:
         for doc_name, page_number in sources:
             st.write(f"- {doc_name} (p. {page_number})")
