@@ -5,7 +5,7 @@ Ask VMM is a lightweight question-answering prototype for public VMM environment
 ## What it does
 
 - Downloads a small corpus of public VMM reports into `data/reports` when they are not already present
-- Extracts text from PDF pages with PyPDF
+- Extracts text from PDF pages with PyPDF and indexes overlapping page windows
 - Combines word-level and character-level TF-IDF retrieval to handle normal wording, compounds, and inflections
 - Returns a concise answer together with document/page citations
 - Refuses unsupported questions when relevance is too low
@@ -46,15 +46,23 @@ The project includes a lightweight validation script:
 
 - python scripts/evaluate.py
 
-This checks representative answerable, English, and deliberately unsupported questions against the real document corpus. It reports:
+This checks representative answerable, English, and deliberately unsupported questions against the real document corpus. Answerable cases use a gold fact and expected page that are not copied from the question; refusal cases are near-misses using corpus vocabulary. It reports:
 
 - strict pass/fail: answer content and expected source must both match for answerable questions
 - hit@3: whether the expected document appears in the top three citations
 - refusal accuracy: whether unsupported questions return no answer and no sources
 
+The current test set contains 9 answerable cases and 5 refusal cases. The latest run was 14/14 passed, with Hit@3 9/9 and refusal accuracy 5/5.
+
 The project also has focused tests:
 
 - python -m pytest -q
+
+To inspect the score trade-off behind the default refusal threshold, run:
+
+- python scripts/calibrate.py
+
+This prints false refusals and false accepts for several threshold values. The current threshold is a conservative starting point, not a production calibration.
 
 GitHub Actions runs the same tests on pushes and pull requests.
 
@@ -86,6 +94,7 @@ This is retrieval plus extractive answering, rather than an LLM-generated RAG an
 - English retrieval is limited when an English question uses terminology that does not overlap with the Dutch source text. A multilingual embedding retriever would be the next retrieval experiment.
 - PDF table extraction and scanned PDFs are not handled reliably; numeric answers need table-aware extraction and extra verification.
 - The refusal threshold is a conservative baseline and should be calibrated on a separate validation set before production use.
+- Runtime report downloads are cached locally, include a descriptive User-Agent, and fail per document with logged diagnostics rather than taking down the whole index.
 
 ## Production direction
 
