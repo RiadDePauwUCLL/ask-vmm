@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import os
-import re
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import List, Tuple
 
 import requests
 from pypdf import PdfReader
@@ -148,6 +147,7 @@ class VMMQA:
                 break
             start = end - CHUNK_OVERLAP
         return chunks
+
     def _clean_question(self, question: str) -> str:
         return re.sub(r"\s+", " ", question).strip()
 
@@ -161,16 +161,20 @@ class VMMQA:
             return 0.0
         return overlap + 0.5 * (1 if any(char.isdigit() for char in sentence) else 0)
 
-    def _answer_from_chunk(self, question: str, chunk: Chunk) -> str:
-        sentences = re.split(r"(?<=[.!?])\s+|\n+", chunk.text)
-        if not sentences:
-            return chunk.text[:400]
+    def _answer_from_chunks(self, question: str, selected) -> str:
+        candidates = []
+        for chunk_score, chunk in selected:
+            for sentence in re.split(r"(?<=[.!?])\s+|\n+", chunk.text):
+                score = self._sentence_score(sentence, question) + 0.1 * chunk_score
+                candidates.append((score, sentence))
 
-        ranked = sorted(sentences, key=lambda s: self._sentence_score(s, question), reverse=True)
-        best = ranked[0]
+        if not candidates:
+            return ""
+
+        best = max(candidates, key=lambda item: item[0])[1].strip()
         if len(best) > 450:
             best = best[:450].rsplit(" ", 1)[0] + "..."
-        return best.strip()
+        return best
 
     def answer_question(
         self,
@@ -205,7 +209,7 @@ class VMMQA:
         if best_score < refusal_score_threshold:
             return "Ik weet het niet. Ik kon in deze documenten geen antwoord vinden.", []
 
-        answer = self._answer_from_chunk(cleaned_question, best_chunk)
+        answer = self._answer_from_chunks(cleaned_question, selected)
 
         question_tokens = {
             token.lower()
@@ -225,7 +229,31 @@ class VMMQA:
 
         answer_overlap = len(question_tokens & answer_tokens)
         chunk_overlap = len(question_tokens & chunk_tokens)
-        strong_cross_language_match = best_score >= 0.18 and answer_overlap >= 1
+        english_markers = {"what", "which", "where", "when", "how", "does", "were", "was"}
+        question_is_english = bool(question_tokens & english_markers)
+        question_identifiers = {
+            token.lower()
+            for token in re.findall(r"\b[A-Za-z]+\d+\b", cleaned_question)
+        }
+        answer_identifiers = {
+            token.lower()
+            for token in re.findall(r"\b[A-Za-z]+\d+\b", answer)
+        }
+        mismatched_identifier = bool(question_identifiers - answer_identifiers)
+        question_proper_tokens = {
+            token.lower()
+            for token in re.findall(r"\b[A-Z][A-Za-z0-9-]+\b", cleaned_question)
+        }
+        answer_proper_tokens = {
+            token.lower()
+            for token in re.findall(r"\b[A-Z][A-Za-z0-9-]+\b", answer)
+        }
+        shared_proper_noun = bool(question_proper_tokens & answer_proper_tokens)
+        strong_cross_language_match = best_score >= 0.18 and shared_proper_noun
+        if question_is_english and answer_overlap == 0 and not strong_cross_language_match:
+            return "Ik weet het niet. Ik kon in deze documenten geen antwoord vinden.", []
+        if mismatched_identifier:
+            return "Ik weet het niet. Ik kon in deze documenten geen antwoord vinden.", []
         if question_tokens and chunk_overlap < 2 and answer_overlap < 2 and not strong_cross_language_match:
             return "Ik weet het niet. Ik kon in deze documenten geen antwoord vinden.", []
 
