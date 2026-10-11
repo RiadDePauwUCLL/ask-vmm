@@ -164,7 +164,8 @@ class VMMQA:
     def _answer_from_chunks(self, question: str, selected) -> str:
         candidates = []
         for chunk_score, chunk in selected:
-            for sentence in re.split(r"(?<=[.!?])\s+|\n+", chunk.text):
+            answer_text = re.sub(r"\s+", " ", chunk.text).strip()
+            for sentence in re.split(r"(?<=[.!?])\s+", answer_text):
                 score = self._sentence_score(sentence, question) + 0.1 * chunk_score
                 candidates.append((score, sentence, chunk))
 
