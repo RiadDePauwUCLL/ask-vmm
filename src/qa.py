@@ -56,6 +56,8 @@ class VMMQA:
         self.chunks: List[Chunk] = []
         self.vectorizer = None
         self.matrix = None
+        self.char_vectorizer = None
+        self.char_matrix = None
         self._load_reports()
 
     def _download_report(self, filename: str, url: str) -> Path:
@@ -86,6 +88,12 @@ class VMMQA:
             min_df=1,
         )
         self.matrix = self.vectorizer.fit_transform(texts)
+        self.char_vectorizer = TfidfVectorizer(
+            analyzer="char_wb",
+            ngram_range=(3, 5),
+            min_df=1,
+        )
+        self.char_matrix = self.char_vectorizer.fit_transform(texts)
 
     def _extract_pdf(self, file_path: Path, source_url: str) -> None:
         try:
@@ -138,15 +146,24 @@ class VMMQA:
         return best.strip()
 
     def answer_question(self, question: str) -> Tuple[str, List[Tuple[str, int]]]:
-        if not self.chunks or self.matrix is None or self.vectorizer is None:
+        if (
+            not self.chunks
+            or self.matrix is None
+            or self.vectorizer is None
+            or self.char_matrix is None
+            or self.char_vectorizer is None
+        ):
             return "Ik weet het niet. Ik kon geen documenten laden.", []
 
         cleaned_question = self._clean_question(question)
         if not cleaned_question:
             return "Ik weet het niet. Ik heb geen vraag ontvangen.", []
 
-        query_vector = self.vectorizer.transform([cleaned_question])
-        scores = cosine_similarity(query_vector, self.matrix).ravel()
+        word_query_vector = self.vectorizer.transform([cleaned_question])
+        char_query_vector = self.char_vectorizer.transform([cleaned_question])
+        word_scores = cosine_similarity(word_query_vector, self.matrix).ravel()
+        char_scores = cosine_similarity(char_query_vector, self.char_matrix).ravel()
+        scores = 0.75 * word_scores + 0.25 * char_scores
         top_indices = scores.argsort()[-3:][::-1]
         selected = [(scores[idx], self.chunks[idx]) for idx in top_indices if scores[idx] > 0.0]
 
